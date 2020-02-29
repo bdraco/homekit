@@ -268,10 +268,10 @@ class HomeDriver(AccessoryDriver):
         super().unpair(client_uuid)
         show_setup_message(self.hass, self.state.pincode)
 
-    def set_characteristics(self, chars_query, *args, **kwargs):
+    def set_characteristics(self, chars_query, client_addr):
         """Override super function in order to prevent process ON before Brightness events."""
         self._suppress_on_events_before_brightness(chars_query[HAP_REPR_CHARS])
-        return super().set_characteristics(chars_query, *args, **kwargs)
+        return super().set_characteristics(chars_query, client_addr)
 
     def _get_char_query_type(self, char_query):
         """type_id for the characteristic as py-hap formats it."""
