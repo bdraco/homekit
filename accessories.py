@@ -34,7 +34,9 @@ from .const import (
     BRIDGE_MODEL,
     BRIDGE_SERIAL_NUMBER,
     CHAR_BATTERY_LEVEL,
+    CHAR_BRIGHTNESS,
     CHAR_CHARGING_STATE,
+    CHAR_ON,
     CHAR_STATUS_LOW_BATTERY,
     CONF_LINKED_BATTERY_SENSOR,
     CONF_LOW_BATTERY_THRESHOLD,
@@ -244,10 +246,6 @@ class HomeBridge(Bridge):
         pass
 
 
-TYPE_ON = "00000025-0000-1000-8000-0026BB765291"
-TYPE_BRIGHTNESS = "00000008-0000-1000-8000-0026BB765291"
-
-
 class HomeDriver(AccessoryDriver):
     """Adapter class for AccessoryDriver."""
 
@@ -269,20 +267,18 @@ class HomeDriver(AccessoryDriver):
         show_setup_message(self.hass, self.state.pincode)
 
     def set_characteristics(self, chars_query, client_addr):
-        """Override super function in order to prevent process ON before Brightness events."""
+        """Override super function in order to prevent process CHAR_ON before CHAR_BRIGHTNESS events."""
         self._suppress_on_events_before_brightness(chars_query[HAP_REPR_CHARS])
         return super().set_characteristics(chars_query, client_addr)
 
-    def _get_char_query_type(self, char_query):
-        """type_id for the characteristic as py-hap formats it."""
-        return str(
-            self.accessory.get_characteristic(
-                char_query[HAP_REPR_AID], char_query[HAP_REPR_IID]
-            ).type_id
-        ).upper()
+    def _get_char_query_name(self, char_query):
+        """Find the characteristic name."""
+        return self.accessory.get_characteristic(
+            char_query[HAP_REPR_AID], char_query[HAP_REPR_IID]
+        ).display_name
 
     def _suppress_on_events_before_brightness(self, char_query_list):
-        """Suppress the On value if it precedes a Brightness event in a single update.
+        """Suppress the CHAR_ON value if it precedes a CHAR_BRIGHTNESS event in a single update.
 
         This prevents FULL ON to 100% and then DIM to the correct level
         as its not so much fun to be blinded at night when you try to
@@ -292,18 +288,18 @@ class HomeDriver(AccessoryDriver):
             return
 
         prev_char_query = char_query_list[0]
-        prev_type = self._get_char_query_type(prev_char_query)
+        prev_name = self._get_char_query_name(prev_char_query)
         for char_query in char_query_list[1:]:
-            this_type = self._get_char_query_type(char_query)
+            this_name = self._get_char_query_name(char_query)
             if (
-                prev_type == TYPE_ON
-                and this_type == TYPE_BRIGHTNESS
+                prev_name == CHAR_ON
+                and this_name == CHAR_BRIGHTNESS
                 and HAP_REPR_VALUE in prev_char_query
             ):
-                _LOGGER.info(
-                    "Suppressed a TYPE_ON (set to 100%) that preceded a TYPE_BRIGHTNESS."
+                _LOGGER.debug(
+                    "Suppressed a CHAR_ON (set to 100%) that preceded a CHAR_BRIGHTNESS."
                 )
                 del prev_char_query[HAP_REPR_VALUE]
                 return
-            prev_type = this_type
+            prev_name = this_name
             prev_char_query = char_query

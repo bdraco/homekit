@@ -22,7 +22,7 @@ from homeassistant.const import (
     EVENT_HOMEASSISTANT_START,
     EVENT_HOMEASSISTANT_STOP,
     TEMP_CELSIUS,
-    TEMP_FAHRENHEIT
+    TEMP_FAHRENHEIT,
 )
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.entityfilter import FILTER_SCHEMA
