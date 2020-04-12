@@ -6,13 +6,7 @@ import logging
 
 from pyhap.accessory import Accessory, Bridge
 from pyhap.accessory_driver import AccessoryDriver
-from pyhap.const import (
-    CATEGORY_OTHER,
-    HAP_REPR_AID,
-    HAP_REPR_CHARS,
-    HAP_REPR_IID,
-    HAP_REPR_VALUE,
-)
+from pyhap.const import CATEGORY_OTHER
 
 from homeassistant.const import (
     ATTR_BATTERY_CHARGING,
@@ -34,9 +28,7 @@ from .const import (
     BRIDGE_MODEL,
     BRIDGE_SERIAL_NUMBER,
     CHAR_BATTERY_LEVEL,
-    CHAR_BRIGHTNESS,
     CHAR_CHARGING_STATE,
-    CHAR_ON,
     CHAR_STATUS_LOW_BATTERY,
     CONF_LINKED_BATTERY_SENSOR,
     CONF_LOW_BATTERY_THRESHOLD,
@@ -243,7 +235,6 @@ class HomeBridge(Bridge):
 
     def setup_message(self):
         """Prevent print of pyhap setup message to terminal."""
-        pass
 
 
 class HomeDriver(AccessoryDriver):
@@ -265,41 +256,3 @@ class HomeDriver(AccessoryDriver):
         """Override super function to show setup message if unpaired."""
         super().unpair(client_uuid)
         show_setup_message(self.hass, self.state.pincode)
-
-    def set_characteristics(self, chars_query, client_addr):
-        """Override super function in order to prevent process CHAR_ON before CHAR_BRIGHTNESS events."""
-        self._suppress_on_events_before_brightness(chars_query[HAP_REPR_CHARS])
-        return super().set_characteristics(chars_query, client_addr)
-
-    def _get_char_query_name(self, char_query):
-        """Find the characteristic name."""
-        return self.accessory.get_characteristic(
-            char_query[HAP_REPR_AID], char_query[HAP_REPR_IID]
-        ).display_name
-
-    def _suppress_on_events_before_brightness(self, char_query_list):
-        """Suppress the CHAR_ON value if it precedes a CHAR_BRIGHTNESS event in a single update.
-
-        This prevents FULL ON to 100% and then DIM to the correct level
-        as its not so much fun to be blinded at night when you try to
-        turn on the lights to a specific brightness.
-        """
-        if len(char_query_list) == 1:
-            return
-
-        prev_char_query = char_query_list[0]
-        prev_name = self._get_char_query_name(prev_char_query)
-        for char_query in char_query_list[1:]:
-            this_name = self._get_char_query_name(char_query)
-            if (
-                prev_name == CHAR_ON
-                and this_name == CHAR_BRIGHTNESS
-                and HAP_REPR_VALUE in prev_char_query
-            ):
-                _LOGGER.debug(
-                    "Suppressed a CHAR_ON (set to 100%) that preceded a CHAR_BRIGHTNESS."
-                )
-                del prev_char_query[HAP_REPR_VALUE]
-                return
-            prev_name = this_name
-            prev_char_query = char_query
