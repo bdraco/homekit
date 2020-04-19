@@ -5,6 +5,7 @@ DEVICE_PRECISION_LEEWAY = 6
 DOMAIN = "homekit"
 HOMEKIT_FILE = ".homekit.state"
 HOMEKIT_NOTIFY_ID = 4663548
+AID_STORAGE = "homekit-aid-allocations"
 
 
 # #### Attributes ####
@@ -190,3 +191,8 @@ HK_DOOR_CLOSED = 1
 HK_DOOR_OPENING = 2
 HK_DOOR_CLOSING = 3
 HK_DOOR_STOPPED = 4
+
+# ### Position State ####
+HK_POSITION_GOING_TO_MIN = 0
+HK_POSITION_GOING_TO_MAX = 1
+HK_POSITION_STOPPED = 2
