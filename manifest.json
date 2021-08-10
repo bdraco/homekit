@@ -1,5 +1,5 @@
 {
-  "version": "2021.9.0dev",
+  "version": "2021.9.0",
   "domain": "homekit",
   "name": "HomeKit",
   "documentation": "https://www.home-assistant.io/integrations/homekit",
