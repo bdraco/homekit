@@ -5,9 +5,7 @@ from pyhap.const import CATEGORY_HUMIDIFIER
 
 from homeassistant.components.humidifier.const import (
     ATTR_HUMIDITY,
-    ATTR_MAX_HUMIDITY,
     ATTR_MIN_HUMIDITY,
-    DEFAULT_MAX_HUMIDITY,
     DEFAULT_MIN_HUMIDITY,
     DEVICE_CLASS_DEHUMIDIFIER,
     DEVICE_CLASS_HUMIDIFIER,
@@ -110,10 +108,6 @@ class HumidifierDehumidifier(HomeAccessory):
             CHAR_CURRENT_HUMIDITY, value=0
         )
 
-        max_humidity = state.attributes.get(ATTR_MAX_HUMIDITY, DEFAULT_MAX_HUMIDITY)
-        max_humidity = round(max_humidity)
-        max_humidity = min(max_humidity, 100)
-
         min_humidity = state.attributes.get(ATTR_MIN_HUMIDITY, DEFAULT_MIN_HUMIDITY)
         min_humidity = round(min_humidity)
         min_humidity = max(min_humidity, 0)
@@ -123,7 +117,6 @@ class HumidifierDehumidifier(HomeAccessory):
             value=45,
             properties={
                 PROP_MIN_VALUE: min_humidity,
-                PROP_MAX_VALUE: max_humidity,
                 PROP_MIN_STEP: 1,
             },
         )
