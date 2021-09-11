@@ -55,7 +55,6 @@ from .const import (
     SERV_SPEAKER,
     SERV_STATELESS_PROGRAMMABLE_SWITCH,
 )
-from .img_util import scale_jpeg_camera_image
 from .util import pid_is_alive
 
 _LOGGER = logging.getLogger(__name__)
@@ -175,8 +174,10 @@ class Camera(HomeAccessory, PyhapCamera):
         }
         audio_options = {
             "codecs": [
-                {"type": "OPUS", "samplerate": 24},
-                {"type": "OPUS", "samplerate": 16},
+                #                {"type": "OPUS", "samplerate": 24},
+                #                {"type": "OPUS", "samplerate": 16},
+                {"type": "AAC-eld", "samplerate": 24},
+                #                {"type": "AAC-eld", "samplerate": 16},
             ]
         }
 
@@ -467,8 +468,9 @@ class Camera(HomeAccessory, PyhapCamera):
 
     async def async_get_snapshot(self, image_size):
         """Return a jpeg of a snapshot from the camera."""
-        return scale_jpeg_camera_image(
-            await self.hass.components.camera.async_get_image(self.entity_id),
-            image_size["image-width"],
-            image_size["image-height"],
+        image = await self.hass.components.camera.async_get_image(
+            self.entity_id,
+            width=image_size["image-width"],
+            height=image_size["image-height"],
         )
+        return image.content
