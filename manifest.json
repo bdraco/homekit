@@ -1,10 +1,10 @@
 {
-  "version": "2021.9.2",
   "domain": "homekit",
   "name": "HomeKit",
   "documentation": "https://www.home-assistant.io/integrations/homekit",
+  "version": "2022.2.2",
   "requirements": [
-    "HAP-python==4.2.1",
+    "HAP-python==4.4.0",
     "fnvhash==0.1.0",
     "PyQRCode==1.2.1",
     "base36==0.1.1"
@@ -14,5 +14,6 @@
   "codeowners": ["@bdraco"],
   "zeroconf": ["_homekit._tcp.local."],
   "config_flow": true,
-  "iot_class": "local_push"
+  "iot_class": "local_push",
+  "loggers": ["pyhap"]
 }

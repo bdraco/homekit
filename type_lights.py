@@ -7,11 +7,17 @@ from pyhap.const import CATEGORY_LIGHTBULB
 from homeassistant.components.light import (
     ATTR_BRIGHTNESS,
     ATTR_BRIGHTNESS_PCT,
+    ATTR_COLOR_MODE,
     ATTR_COLOR_TEMP,
     ATTR_HS_COLOR,
     ATTR_MAX_MIREDS,
     ATTR_MIN_MIREDS,
+    ATTR_RGB_COLOR,
+    ATTR_RGBW_COLOR,
+    ATTR_RGBWW_COLOR,
     ATTR_SUPPORTED_COLOR_MODES,
+    COLOR_MODE_RGBW,
+    COLOR_MODE_RGBWW,
     DOMAIN,
     brightness_supported,
     color_supported,
@@ -26,6 +32,7 @@ from homeassistant.const import (
 from homeassistant.core import callback
 from homeassistant.helpers.event import async_call_later
 from homeassistant.util.color import (
+    color_hsv_to_RGB,
     color_temperature_mired_to_kelvin,
     color_temperature_to_hs,
 )
@@ -48,6 +55,11 @@ RGB_COLOR = "rgb_color"
 
 CHANGE_COALESCE_TIME_WINDOW = 0.01
 
+DEFAULT_MIN_MIREDS = 153
+DEFAULT_MAX_MIREDS = 500
+
+COLOR_MODES_WITH_WHITES = {COLOR_MODE_RGBW, COLOR_MODE_RGBWW}
+
 
 @TYPES.register("Light")
 class Light(HomeAccessory):
@@ -66,9 +78,12 @@ class Light(HomeAccessory):
 
         state = self.hass.states.get(self.entity_id)
         attributes = state.attributes
-        color_modes = attributes.get(ATTR_SUPPORTED_COLOR_MODES)
+        self.color_modes = color_modes = (
+            attributes.get(ATTR_SUPPORTED_COLOR_MODES) or []
+        )
         self.color_supported = color_supported(color_modes)
         self.color_temp_supported = color_temp_supported(color_modes)
+        self.rgbww_supported = COLOR_MODE_RGBWW in color_modes
         self.brightness_supported = brightness_supported(color_modes)
 
         if self.brightness_supported:
@@ -77,7 +92,9 @@ class Light(HomeAccessory):
         if self.color_supported:
             self.chars.extend([CHAR_HUE, CHAR_SATURATION])
 
-        if self.color_temp_supported:
+        if self.color_temp_supported or COLOR_MODES_WITH_WHITES.intersection(
+            self.color_modes
+        ):
             self.chars.append(CHAR_COLOR_TEMPERATURE)
 
         serv_light = self.add_preload_service(SERV_LIGHTBULB, self.chars)
@@ -89,9 +106,9 @@ class Light(HomeAccessory):
             # to set to the correct initial value.
             self.char_brightness = serv_light.configure_char(CHAR_BRIGHTNESS, value=100)
 
-        if self.color_temp_supported:
-            min_mireds = math.floor(attributes.get(ATTR_MIN_MIREDS, 153))
-            max_mireds = math.ceil(attributes.get(ATTR_MAX_MIREDS, 500))
+        if CHAR_COLOR_TEMPERATURE in self.chars:
+            min_mireds = math.floor(attributes.get(ATTR_MIN_MIREDS, DEFAULT_MIN_MIREDS))
+            max_mireds = math.ceil(attributes.get(ATTR_MAX_MIREDS, DEFAULT_MAX_MIREDS))
             self.char_color_temp = serv_light.configure_char(
                 CHAR_COLOR_TEMPERATURE,
                 value=min_mireds,
@@ -120,10 +137,11 @@ class Light(HomeAccessory):
         if self._event_timer:
             self._event_timer()
         self._event_timer = async_call_later(
-            self.hass, CHANGE_COALESCE_TIME_WINDOW, self._send_events
+            self.hass, CHANGE_COALESCE_TIME_WINDOW, self._async_send_events
         )
 
-    def _send_events(self, *_):
+    @callback
+    def _async_send_events(self, *_):
         """Process all changes at once."""
         _LOGGER.debug("Coalesced _set_chars: %s", self._pending_events)
         char_values = self._pending_events
@@ -137,12 +155,13 @@ class Light(HomeAccessory):
                 service = SERVICE_TURN_OFF
             events.append(f"Set state to {char_values[CHAR_ON]}")
 
+        brightness_pct = None
         if CHAR_BRIGHTNESS in char_values:
             if char_values[CHAR_BRIGHTNESS] == 0:
                 events[-1] = "Set state to 0"
                 service = SERVICE_TURN_OFF
             else:
-                params[ATTR_BRIGHTNESS_PCT] = char_values[CHAR_BRIGHTNESS]
+                brightness_pct = char_values[CHAR_BRIGHTNESS]
             events.append(f"brightness at {char_values[CHAR_BRIGHTNESS]}%")
 
         if service == SERVICE_TURN_OFF:
@@ -152,16 +171,45 @@ class Light(HomeAccessory):
             return
 
         if CHAR_COLOR_TEMPERATURE in char_values:
-            params[ATTR_COLOR_TEMP] = char_values[CHAR_COLOR_TEMPERATURE]
-            events.append(f"color temperature at {params[ATTR_COLOR_TEMP]}")
+            events.append(f"color temperature at {char_values[CHAR_COLOR_TEMPERATURE]}")
+            if self.color_temp_supported or self.rgbww_supported:
+                params[ATTR_COLOR_TEMP] = char_values[CHAR_COLOR_TEMPERATURE]
+            else:
+                params[ATTR_RGBW_COLOR] = (
+                    *(0,) * 3,
+                    round(((brightness_pct or self.char_brightness.value) * 255) / 100),
+                )
 
-        elif CHAR_HUE in char_values or CHAR_SATURATION in char_values:
-            color = params[ATTR_HS_COLOR] = (
+        elif (
+            CHAR_HUE in char_values
+            or CHAR_SATURATION in char_values
+            # If we are adjusting brightness we need to send the full RGBW/RGBWW values
+            # since HomeKit does not support RGBW/RGBWW
+            or brightness_pct
+            and COLOR_MODES_WITH_WHITES.intersection(self.color_modes)
+        ):
+            hue_sat = (
                 char_values.get(CHAR_HUE, self.char_hue.value),
                 char_values.get(CHAR_SATURATION, self.char_saturation.value),
             )
-            _LOGGER.debug("%s: Set hs_color to %s", self.entity_id, color)
-            events.append(f"set color at {color}")
+            _LOGGER.debug("%s: Set hs_color to %s", self.entity_id, hue_sat)
+            events.append(f"set color at {hue_sat}")
+            # HomeKit doesn't support RGBW/RGBWW so we need to remove any white values
+            if COLOR_MODE_RGBWW in self.color_modes:
+                val = brightness_pct or self.char_brightness.value
+                params[ATTR_RGBWW_COLOR] = (*color_hsv_to_RGB(*hue_sat, val), 0, 0)
+            elif COLOR_MODE_RGBW in self.color_modes:
+                val = brightness_pct or self.char_brightness.value
+                params[ATTR_RGBW_COLOR] = (*color_hsv_to_RGB(*hue_sat, val), 0)
+            else:
+                params[ATTR_HS_COLOR] = hue_sat
+
+        if (
+            brightness_pct
+            and ATTR_RGBWW_COLOR not in params
+            and ATTR_RGBW_COLOR not in params
+        ):
+            params[ATTR_BRIGHTNESS_PCT] = brightness_pct
 
         self.async_call_service(DOMAIN, service, params, ", ".join(events))
 
@@ -171,11 +219,21 @@ class Light(HomeAccessory):
         # Handle State
         state = new_state.state
         attributes = new_state.attributes
+        color_mode = attributes.get(ATTR_COLOR_MODE)
         self.char_on.set_value(int(state == STATE_ON))
 
         # Handle Brightness
         if self.brightness_supported:
-            brightness = attributes.get(ATTR_BRIGHTNESS)
+            if (
+                color_mode
+                and COLOR_MODES_WITH_WHITES.intersection({color_mode})
+                and (rgb_color := attributes.get(ATTR_RGB_COLOR))
+            ):
+                # HomeKit doesn't support RGBW/RGBWW so we need to
+                # give it the color brightness only
+                brightness = max(rgb_color)
+            else:
+                brightness = attributes.get(ATTR_BRIGHTNESS)
             if isinstance(brightness, (int, float)):
                 brightness = round(brightness / 255 * 100, 0)
                 # The homeassistant component might report its brightness as 0 but is
