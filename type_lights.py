@@ -211,7 +211,11 @@ class Light(HomeAccessory):
             events.append(f"set color at {hue_sat}")
             params[ATTR_HS_COLOR] = hue_sat
 
-        if brightness_pct:
+        if (
+            brightness_pct
+            and ATTR_RGBWW_COLOR not in params
+            and ATTR_RGBW_COLOR not in params
+        ):
             params[ATTR_BRIGHTNESS_PCT] = brightness_pct
 
         _LOGGER.debug(
@@ -250,6 +254,8 @@ class Light(HomeAccessory):
             if brightness == 0 and state == STATE_ON:
                 brightness = 1
             self.char_brightness.set_value(brightness)
+            if color_mode_changed:
+                self.char_brightness.notify()
 
         # Handle Color - color must always be set before color temperature
         # or the iOS UI will not display it correctly.
