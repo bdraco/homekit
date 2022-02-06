@@ -14,7 +14,6 @@ from homeassistant.components.light import (
     ATTR_HS_COLOR,
     ATTR_MAX_MIREDS,
     ATTR_MIN_MIREDS,
-    ATTR_RGB_COLOR,
     ATTR_RGBW_COLOR,
     ATTR_RGBWW_COLOR,
     ATTR_SUPPORTED_COLOR_MODES,
@@ -33,16 +32,12 @@ from homeassistant.const import (
     SERVICE_TURN_ON,
     STATE_ON,
 )
-from homeassistant.core import State, callback
+from homeassistant.core import callback
 from homeassistant.helpers.event import async_call_later
 from homeassistant.util.color import (
-    color_hsv_to_RGB,
-    color_RGB_to_hs,
     color_temperature_mired_to_kelvin,
     color_temperature_to_hs,
     color_temperature_to_rgbww,
-    rgbww_to_color_temperature,
-    while_levels_to_color_temperature,
 )
 
 from .accessories import TYPES, HomeAccessory
@@ -59,44 +54,13 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-RGB_COLOR = "rgb_color"
 
 CHANGE_COALESCE_TIME_WINDOW = 0.01
 
 DEFAULT_MIN_MIREDS = 153
 DEFAULT_MAX_MIREDS = 500
 
-COLOR_MODES_WITH_COLORS_AND_WHITE = {COLOR_MODE_RGBW, COLOR_MODE_RGBWW}
-COLOR_MODES_WITH_WHITES = {*COLOR_MODES_WITH_COLORS_AND_WHITE, COLOR_MODE_WHITE}
-ATTRS_WITH_WHITE = {ATTR_RGBWW_COLOR, ATTR_RGBW_COLOR, ATTR_WHITE}
-
-
-def _has_no_white_values(state: State | None) -> bool:
-    """Check if all the whites are off."""
-    if state is None:
-        return False
-    attributes = state.attributes
-    if rgbww := attributes.get(ATTR_RGBWW_COLOR):
-        _, _, _, cold, warm = rgbww
-        return cold == 0 and warm == 0
-    if rgbw := attributes.get(ATTR_RGBW_COLOR):
-        _, _, _, white = rgbw
-        return white == 0
-    return False
-
-
-def _has_no_color_values(state: State | None) -> bool:
-    """Check if all the colors are off."""
-    if state is None:
-        return False
-    attributes = state.attributes
-    if rgbww := attributes.get(ATTR_RGBWW_COLOR):
-        red, green, blue, _, _ = rgbww
-        return red == 0 and green == 0 and blue == 0
-    if rgbw := attributes.get(ATTR_RGBW_COLOR):
-        red, green, blue, _ = rgbw
-        return red == 0 and green == 0 and blue == 0
-    return False
+COLOR_MODES_WITH_WHITES = {COLOR_MODE_RGBW, COLOR_MODE_RGBWW, COLOR_MODE_WHITE}
 
 
 @TYPES.register("Light")
@@ -124,6 +88,7 @@ class Light(HomeAccessory):
         self.color_temp_supported = color_temp_supported(color_modes)
         self.rgbw_supported = COLOR_MODE_RGBW in color_modes
         self.rgbww_supported = COLOR_MODE_RGBWW in color_modes
+        self.white_supported = COLOR_MODE_WHITE in color_modes
         self.brightness_supported = brightness_supported(color_modes)
 
         if self.brightness_supported:
@@ -198,8 +163,6 @@ class Light(HomeAccessory):
         events = []
         service = SERVICE_TURN_ON
         params = {ATTR_ENTITY_ID: self.entity_id}
-        state = self.hass.states.get(self.entity_id)
-        color_mode = state.attributes.get(ATTR_COLOR_MODE) if state else None
 
         if CHAR_ON in char_values:
             if not char_values[CHAR_ON]:
@@ -236,7 +199,7 @@ class Light(HomeAccessory):
                 )
             elif self.rgbw_supported:
                 params[ATTR_RGBW_COLOR] = (*(0,) * 3, bright_val)
-            else:
+            elif self.white_supported:
                 params[ATTR_WHITE] = bright_val
 
         elif CHAR_HUE in char_values or CHAR_SATURATION in char_values:
@@ -246,61 +209,10 @@ class Light(HomeAccessory):
             )
             _LOGGER.debug("%s: Set hs_color to %s", self.entity_id, hue_sat)
             events.append(f"set color at {hue_sat}")
-            # HomeKit doesn't support RGBW/RGBWW so we need to remove any white values
-            if self.rgbww_supported:
-                params[ATTR_RGBWW_COLOR] = (
-                    *color_hsv_to_RGB(
-                        *hue_sat, brightness_pct or self.char_brightness.value
-                    ),
-                    0,
-                    0,
-                )
-            elif self.rgbw_supported:
-                params[ATTR_RGBW_COLOR] = (
-                    *color_hsv_to_RGB(
-                        *hue_sat, brightness_pct or self.char_brightness.value
-                    ),
-                    0,
-                )
-            else:
-                params[ATTR_HS_COLOR] = hue_sat
+            params[ATTR_HS_COLOR] = hue_sat
 
-        if brightness_pct and not ATTRS_WITH_WHITE.intersection(params):
-            # HomeKit only supports RGB and WHITE values being interlocked
-            # similar to esphome's color_interlock: true
-            if color_mode in COLOR_MODES_WITH_COLORS_AND_WHITE:
-                assert isinstance(state, State)
-                if _has_no_color_values(state):
-                    if rgbww := state.attributes.get(ATTR_RGBWW_COLOR):
-                        params[ATTR_RGBWW_COLOR] = color_temperature_to_rgbww(
-                            while_levels_to_color_temperature(
-                                *rgbww[-2:], self.min_mireds, self.max_mireds
-                            )[0],
-                            brightness_pct * 2.55,
-                            self.min_mireds,
-                            self.max_mireds,
-                        )
-                    elif ATTR_RGBW_COLOR in state.attributes:
-                        params[ATTR_RGBW_COLOR] = (
-                            *(0,) * 3,
-                            min(255, round(brightness_pct * 2.55)),
-                        )
-                elif _has_no_white_values(state):
-                    if rgbww := state.attributes.get(ATTR_RGBWW_COLOR):
-                        hue_sat = color_RGB_to_hs(*rgbww[:3])
-                        params[ATTR_RGBWW_COLOR] = (
-                            *color_hsv_to_RGB(*hue_sat, brightness_pct),
-                            0,
-                            0,
-                        )
-                    elif rgbw := state.attributes.get(ATTR_RGBW_COLOR):
-                        hue_sat = color_RGB_to_hs(*rgbw[:3])
-                        params[ATTR_RGBW_COLOR] = (
-                            *color_hsv_to_RGB(*hue_sat, brightness_pct),
-                            0,
-                        )
-            if ATTR_RGBWW_COLOR not in params and ATTR_RGBW_COLOR not in params:
-                params[ATTR_BRIGHTNESS_PCT] = brightness_pct
+        if brightness_pct:
+            params[ATTR_BRIGHTNESS_PCT] = brightness_pct
 
         _LOGGER.debug(
             "Calling light service with params: %s -> %s", char_values, params
@@ -319,57 +231,35 @@ class Light(HomeAccessory):
         self._previous_color_mode = color_mode
 
         # Handle Brightness
-        if self.brightness_supported:
-            brightness = None
-            if color_mode in COLOR_MODES_WITH_COLORS_AND_WHITE:
-                # HomeKit only supports RGB and WHITE values being interlocked
-                # similar to esphome's color_interlock: true
-                if _has_no_color_values(new_state):
-                    if rgbww := attributes.get(ATTR_RGBWW_COLOR):
-                        brightness = min(255, rgbww[3] + rgbww[4])
-                    if rgbw := attributes.get(ATTR_RGBW_COLOR):
-                        brightness = rgbw[3]
-                elif _has_no_white_values(new_state):
-                    brightness = max(attributes[ATTR_RGB_COLOR])
-            if brightness is None:
-                brightness = attributes.get(ATTR_BRIGHTNESS)
-            if isinstance(brightness, (int, float)):
-                brightness = round(brightness / 255 * 100, 0)
-                # The homeassistant component might report its brightness as 0 but is
-                # not off. But 0 is a special value in homekit. When you turn on a
-                # homekit accessory it will try to restore the last brightness state
-                # which will be the last value saved by char_brightness.set_value.
-                # But if it is set to 0, HomeKit will update the brightness to 100 as
-                # it thinks 0 is off.
-                #
-                # Therefore, if the the brightness is 0 and the device is still on,
-                # the brightness is mapped to 1 otherwise the update is ignored in
-                # order to avoid this incorrect behavior.
-                if brightness == 0 and state == STATE_ON:
-                    brightness = 1
-                self.char_brightness.set_value(brightness)
+        if (
+            self.brightness_supported
+            and (brightness := attributes.get(ATTR_BRIGHTNESS)) is not None
+            and isinstance(brightness, (int, float))
+        ):
+            brightness = round(brightness / 255 * 100, 0)
+            # The homeassistant component might report its brightness as 0 but is
+            # not off. But 0 is a special value in homekit. When you turn on a
+            # homekit accessory it will try to restore the last brightness state
+            # which will be the last value saved by char_brightness.set_value.
+            # But if it is set to 0, HomeKit will update the brightness to 100 as
+            # it thinks 0 is off.
+            #
+            # Therefore, if the the brightness is 0 and the device is still on,
+            # the brightness is mapped to 1 otherwise the update is ignored in
+            # order to avoid this incorrect behavior.
+            if brightness == 0 and state == STATE_ON:
+                brightness = 1
+            self.char_brightness.set_value(brightness)
 
         # Handle Color - color must always be set before color temperature
         # or the iOS UI will not display it correctly.
         if self.color_supported:
-            if ATTR_COLOR_TEMP in attributes:
+            if color_temp := attributes.get(ATTR_COLOR_TEMP):
                 hue, saturation = color_temperature_to_hs(
-                    color_temperature_mired_to_kelvin(attributes[ATTR_COLOR_TEMP])
+                    color_temperature_mired_to_kelvin(color_temp)
                 )
-            elif color_mode == COLOR_MODE_WHITE or (
-                color_mode in COLOR_MODES_WITH_COLORS_AND_WHITE
-                and _has_no_color_values(new_state)
-            ):
-                if rgbww := attributes.get(ATTR_RGBWW_COLOR):
-                    hue, saturation = color_temperature_to_hs(
-                        color_temperature_mired_to_kelvin(
-                            rgbww_to_color_temperature(
-                                rgbww, self.min_mireds, self.max_mireds
-                            )[0]
-                        )
-                    )
-                else:
-                    hue, saturation = 0, 0
+            elif color_mode == COLOR_MODE_WHITE:
+                hue, saturation = 0, 0
             else:
                 hue, saturation = attributes.get(ATTR_HS_COLOR, (None, None))
             if isinstance(hue, (int, float)) and isinstance(saturation, (int, float)):
@@ -385,16 +275,8 @@ class Light(HomeAccessory):
             color_temp = None
             if self.color_temp_supported:
                 color_temp = attributes.get(ATTR_COLOR_TEMP)
-            elif color_mode == COLOR_MODE_WHITE or (
-                color_mode in COLOR_MODES_WITH_COLORS_AND_WHITE
-                and _has_no_color_values(new_state)
-            ):
-                if rgbww := attributes.get(ATTR_RGBWW_COLOR):
-                    color_temp = rgbww_to_color_temperature(
-                        rgbww, self.min_mireds, self.max_mireds
-                    )[0]
-                else:
-                    color_temp = self.min_mireds
+            elif color_mode == COLOR_MODE_WHITE:
+                color_temp = self.min_mireds
             if isinstance(color_temp, (int, float)):
                 self.char_color_temp.set_value(round(color_temp, 0))
                 if color_mode_changed:
