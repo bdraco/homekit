@@ -2,9 +2,9 @@
   "domain": "homekit",
   "name": "HomeKit",
   "documentation": "https://www.home-assistant.io/integrations/homekit",
-  "version": "4.5.1",
+  "version": "4.5.0",
   "requirements": [
-    "ha-HAP-python==4.5.1",
+    "HAP-python==4.5.0",
     "fnvhash==0.1.0",
     "PyQRCode==1.2.1",
     "base36==0.1.1"
