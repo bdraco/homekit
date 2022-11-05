@@ -413,14 +413,40 @@ def density_to_air_quality(density: float) -> int:
 
 
 def density_to_air_quality_pm10(density: float) -> int:
-    """Map PM10 density to HomeKit AirQuality level."""
-    if density <= 40:
+    """Map PM10 µg/m3 density to HomeKit AirQuality level."""
+    if density <= 54:  # US AQI 0-50 (HomeKit: Excellent)
         return 1
-    if density <= 80:
+    if density <= 154:  # US AQI 51-100 (HomeKit: Good)
         return 2
-    if density <= 120:
+    if density <= 254:  # US AQI 101-150 (HomeKit: Fair)
         return 3
-    if density <= 300:
+    if density <= 354:  # US AQI 151-200 (HomeKit: Inferior)
+        return 4
+    return 5  # US AQI 201+ (HomeKit: Poor)
+
+
+def density_to_air_quality_nitrogen_dioxide(density: float) -> int:
+    """Map nitrogen dioxide µg/m3 to HomeKit AirQuality level."""
+    if density <= 30:
+        return 1
+    if density <= 60:
+        return 2
+    if density <= 80:
+        return 3
+    if density <= 90:
+        return 4
+    return 5
+
+
+def density_to_air_quality_voc(density: float) -> int:
+    """Map VOCs µg/m3 to HomeKit AirQuality level."""
+    if density <= 24:
+        return 1
+    if density <= 48:
+        return 2
+    if density <= 64:
+        return 3
+    if density <= 96:
         return 4
     return 5
 
@@ -478,18 +504,15 @@ def _is_zero_but_true(value: Any) -> bool:
     return convert_to_float(value) == 0
 
 
-def remove_state_files_for_entry_id(hass: HomeAssistant, entry_id: str) -> bool:
+def remove_state_files_for_entry_id(hass: HomeAssistant, entry_id: str) -> None:
     """Remove the state files from disk."""
-    persist_file_path = get_persist_fullpath_for_entry_id(hass, entry_id)
-    aid_storage_path = get_aid_storage_fullpath_for_entry_id(hass, entry_id)
-    iid_storage_path = get_iid_storage_fullpath_for_entry_id(hass, entry_id)
-
-    os.unlink(persist_file_path)
-    if os.path.exists(aid_storage_path):
-        os.unlink(aid_storage_path)
-    if os.path.exists(iid_storage_path):
-        os.unlink(iid_storage_path)
-    return True
+    for path in (
+        get_persist_fullpath_for_entry_id(hass, entry_id),
+        get_aid_storage_fullpath_for_entry_id(hass, entry_id),
+        get_iid_storage_fullpath_for_entry_id(hass, entry_id),
+    ):
+        if os.path.exists(path):
+            os.unlink(path)
 
 
 def _get_test_socket() -> socket.socket:
